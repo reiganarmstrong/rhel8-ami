@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+log() { printf '\n===== %s =====\n' "$*"; }
+die() { echo "ERROR: $*" >&2; exit 1; }
+require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"; }
+
+log "CHECKING REQUIRED BASE-IMAGE TOOLS"
+required_commands=(cloud-init getent usermod systemctl mountpoint findmnt pvs vgs lvs lvmconfig dracut lsinitrd restorecon chcon)
+for command_name in "${required_commands[@]}"; do
+    require_command "$command_name"
+done
+
+mountpoint -q /localhome || die "/localhome is not mounted"
+getent passwd ec2-user >/dev/null || die "ec2-user does not exist in the source AMI"
+
+log "CONFIGURING EC2-USER"
+usermod -d /localhome/ec2-user -s /bin/bash ec2-user
+getent passwd ec2-user | grep -q ':/localhome/ec2-user:/bin/bash$' || die "ec2-user does not use /localhome/ec2-user"
+
+install -d -o ec2-user -g ec2-user -m 0700 /localhome/ec2-user
+install -d -o ec2-user -g ec2-user -m 0700 /localhome/ec2-user/.ssh
+if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
+    chown ec2-user:ec2-user /localhome/ec2-user/.ssh/authorized_keys
+    chmod 0600 /localhome/ec2-user/.ssh/authorized_keys
+fi
+
+log "ADDING MINIMAL AWS CLOUD-INIT OVERRIDE"
+mkdir -p /etc/cloud/cloud.cfg.d
+cat >/etc/cloud/cloud.cfg.d/99-aws-ec2.cfg <<'EOF'
+#cloud-config
+
+datasource_list: [Ec2]
+
+system_info:
+  default_user:
+    name: ec2-user
+    homedir: /localhome/ec2-user
+EOF
+
+chown root:root /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
+chmod 0644 /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
+restorecon -v /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
+
+grep -qE '^[[:space:]]*-[[:space:]]*default[[:space:]]*$' /etc/cloud/cloud.cfg || die "Packaged cloud.cfg does not contain users: [default]"
+grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*users[_-]groups[[:space:]]*$' || die "users_groups is missing from cloud_init_modules"
+grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*ssh[[:space:]]*$' || die "ssh is missing from cloud_init_modules"
+
+log "CONFIGURING /LOCALHOME BOOT ORDERING"
+rm -f /etc/systemd/system/cloud-config.service.d/99-wait-for-localhome.conf
+rmdir /etc/systemd/system/cloud-config.service.d 2>/dev/null || true
+mkdir -p /etc/systemd/system/cloud-init.service.d
+cat >/etc/systemd/system/cloud-init.service.d/99-wait-for-localhome.conf <<'EOF'
+[Unit]
+RequiresMountsFor=/localhome
+EOF
+systemctl daemon-reload
+systemctl show cloud-init.service -p RequiresMountsFor | grep -q '/localhome' || die "cloud-init.service does not wait for /localhome"
+
+log "CONFIGURING SELINUX"
+selinux_mode="$(getenforce 2>/dev/null || echo Disabled)"
+if [[ "$selinux_mode" != "Disabled" ]]; then
+    if command -v semanage >/dev/null 2>&1; then
+        semanage fcontext -a -e /home /localhome 2>/dev/null || semanage fcontext -m -e /home /localhome
+        restorecon -RFv /localhome
+        printf '%s\n' persistent >/etc/packer-localhome-selinux-mode
+    else
+        echo "WARNING: semanage is unavailable; using direct SELinux labels."
+        reference_home="/home/packer-selinux-reference"
+        install -d -m 0700 "$reference_home/.ssh"
+        touch "$reference_home/.ssh/authorized_keys"
+        restorecon -RF "$reference_home"
+        chcon --reference=/home /localhome
+        chcon --reference="$reference_home" /localhome/ec2-user
+        chcon --reference="$reference_home/.ssh" /localhome/ec2-user/.ssh
+        if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
+            chcon --reference="$reference_home/.ssh/authorized_keys" /localhome/ec2-user/.ssh/authorized_keys
+        fi
+        rm -rf "$reference_home"
+        printf '%s\n' direct >/etc/packer-localhome-selinux-mode
+    fi
+else
+    printf '%s\n' disabled >/etc/packer-localhome-selinux-mode
+fi
+
+log "TESTING LVM WITHOUT THE DEVICES FILE"
+pvs --config 'devices { use_devicesfile=0 }' -o pv_name,pv_uuid,vg_name
+vgs --config 'devices { use_devicesfile=0 }' -o vg_name,vg_uuid,pv_count,lv_count
+lvs --config 'devices { use_devicesfile=0 }' -a -o lv_name,vg_name,lv_path,devices
+
+log "CONFIGURING PORTABLE LVM DISCOVERY"
+if [[ -f /etc/lvm/lvmlocal.conf ]] && grep -Ev '^[[:space:]]*(#|$)' /etc/lvm/lvmlocal.conf | grep -q .; then
+    die "/etc/lvm/lvmlocal.conf already contains active settings"
+fi
+
+cat >/etc/lvm/lvmlocal.conf <<'EOF'
+# Portable vSphere-to-EC2 image policy.
+devices {
+    use_devicesfile = 0
+}
+EOF
+chown root:root /etc/lvm/lvmlocal.conf
+chmod 0600 /etc/lvm/lvmlocal.conf
+restorecon -v /etc/lvm/lvmlocal.conf
+lvmconfig --type current devices/use_devicesfile | tr -d ' ' | grep -qx 'use_devicesfile=0' || die "LVM devices-file support is still enabled"
+rm -f /etc/lvm/devices/system.devices /etc/lvm/cache/.cache
+
+log "REBUILDING INITRAMFS"
+dracut --regenerate-all --force
+for image in /boot/initramfs-*.img; do
+    if lsinitrd "$image" | grep -q 'etc/lvm/devices/system.devices'; then
+        die "$image still contains system.devices"
+    fi
+done
+
+log "CONFIGURATION COMPLETE"

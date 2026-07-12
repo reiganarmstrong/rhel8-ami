@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "===== FINALIZING TEST AMI ====="
+echo "Preserving inherited authorized_keys for testing."
+
+# Uncomment these for the eventual production AMI.
+# rm -f /localhome/ec2-user/.ssh/authorized_keys
+# rm -f /root/.ssh/authorized_keys
+
+echo "Removing SSH host identity."
+rm -f /etc/ssh/ssh_host_*
+
+echo "Applying persistent SELinux mapping when available."
+selinux_mode="$(cat /etc/packer-localhome-selinux-mode 2>/dev/null || echo unknown)"
+if [[ "$selinux_mode" == "persistent" ]]; then
+    restorecon -RF /localhome
+fi
+
+echo "Cleaning cloud-init and machine identity."
+cloud-init clean --help 2>&1 | grep -q -- '--machine-id' || {
+    echo "cloud-init does not support clean --machine-id" >&2
+    exit 1
+}
+cloud-init clean --logs --machine-id
+
+echo "Removing recreated LVM device state."
+rm -f /etc/lvm/devices/system.devices /etc/lvm/cache/.cache
+sync
+
+echo "Finalization complete. Packer will stop the builder."

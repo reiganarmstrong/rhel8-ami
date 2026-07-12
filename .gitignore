@@ -1,0 +1,24 @@
+# Local Packer inputs (AMI IDs, network IDs, and private-key paths)
+*.auto.pkrvars.hcl
+*.pkrvars.hcl
+!*.pkrvars.hcl.example
+
+# Packer downloads, caches, and build artifacts
+.packer.d/
+packer_cache/
+*.box
+manifest.json
+
+# Local credentials and keys
+*.pem
+*.key
+.env
+.env.*
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
