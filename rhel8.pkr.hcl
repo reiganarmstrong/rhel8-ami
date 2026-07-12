@@ -1,8 +1,9 @@
 packer {
   required_plugins {
     amazon = {
-      source  = "github.com/hashicorp/amazon"
-      version = "~> 1"
+      source = "github.com/hashicorp/amazon"
+      # Kept in sync with vendor/packer/plugins for reproducible offline builds.
+      version = "= 1.8.1"
     }
   }
 }
@@ -49,7 +50,7 @@ source "amazon-ebs" "rhel8" {
   security_group_id = var.security_group_id
 
   associate_public_ip_address = false
-  ssh_interface              = "private_ip"
+  ssh_interface               = "private_ip"
 
   ssh_username         = "ec2-user"
   ssh_private_key_file = var.ssh_private_key_file

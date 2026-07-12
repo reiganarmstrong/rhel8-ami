@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+plugin_root="$repo_root/vendor/packer/plugins"
+plugin_binary="$plugin_root/github.com/hashicorp/amazon/packer-plugin-amazon_v1.8.1_x5.0_linux_amd64"
+plugin_checksum="$plugin_binary"_SHA256SUM
+
+if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
+    echo "The vendored Packer plugin supports Linux x86_64 only." >&2
+    exit 1
+fi
+
+if [[ ! -x "$plugin_binary" || ! -f "$plugin_checksum" ]]; then
+    echo "The vendored Amazon plugin or its checksum is missing." >&2
+    exit 1
+fi
+
+if ! command -v packer >/dev/null 2>&1; then
+    echo "Packer is not installed or is not on PATH." >&2
+    exit 1
+fi
+
+if ! command -v sha256sum >/dev/null 2>&1; then
+    echo "sha256sum is required to verify the vendored plugin." >&2
+    exit 1
+fi
+
+read -r expected_checksum <"$plugin_checksum"
+actual_checksum="$(sha256sum "$plugin_binary")"
+actual_checksum="${actual_checksum%% *}"
+if [[ "$actual_checksum" != "$expected_checksum" ]]; then
+    echo "The vendored Amazon plugin failed its SHA-256 verification." >&2
+    exit 1
+fi
+
+# Packer uses this namespaced, repo-local directory and therefore never needs
+# to discover or download the required Amazon plugin from the public internet.
+export PACKER_PLUGIN_PATH="$plugin_root"
+# Disable HashiCorp update checks and telemetry, which otherwise contact the
+# public checkpoint service even when all plugins are installed locally.
+export CHECKPOINT_DISABLE=1
+exec packer "$@"
