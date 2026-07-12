@@ -5,6 +5,8 @@ log() { printf '\n===== %s =====\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"; }
 
+(( EUID == 0 )) || die "Run this script as root"
+
 log "CHECKING REQUIRED BASE-IMAGE TOOLS"
 required_commands=(cloud-init getent usermod systemctl mountpoint findmnt pvs vgs lvs lvmconfig dracut lsinitrd restorecon chcon)
 for command_name in "${required_commands[@]}"; do
@@ -13,17 +15,30 @@ done
 
 mountpoint -q /localhome || die "/localhome is not mounted"
 getent passwd ec2-user >/dev/null || die "ec2-user does not exist in the source AMI"
+[[ ! -e /etc/cloud/cloud-init.disabled ]] || die "cloud-init is disabled by /etc/cloud/cloud-init.disabled"
+
+cat /proc/sys/kernel/random/boot_id >/etc/packer-configure-boot-id
 
 log "CONFIGURING EC2-USER"
+old_home="$(getent passwd ec2-user | cut -d: -f6)"
+new_home="/localhome/ec2-user"
+
+install -d -o ec2-user -g ec2-user -m 0700 "$new_home"
+install -d -o ec2-user -g ec2-user -m 0700 "$new_home/.ssh"
+if [[ "$old_home" != "$new_home" && -f "$old_home/.ssh/authorized_keys" && ! -e "$new_home/.ssh/authorized_keys" ]]; then
+    echo "Copying the inherited SSH key from $old_home to $new_home for the builder reboot."
+    install -o ec2-user -g ec2-user -m 0600 \
+        "$old_home/.ssh/authorized_keys" "$new_home/.ssh/authorized_keys"
+fi
+
 usermod -d /localhome/ec2-user -s /bin/bash ec2-user
 getent passwd ec2-user | grep -q ':/localhome/ec2-user:/bin/bash$' || die "ec2-user does not use /localhome/ec2-user"
 
-install -d -o ec2-user -g ec2-user -m 0700 /localhome/ec2-user
-install -d -o ec2-user -g ec2-user -m 0700 /localhome/ec2-user/.ssh
 if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
     chown ec2-user:ec2-user /localhome/ec2-user/.ssh/authorized_keys
     chmod 0600 /localhome/ec2-user/.ssh/authorized_keys
 fi
+[[ -s /localhome/ec2-user/.ssh/authorized_keys ]] || die "No usable authorized_keys file exists in the new ec2-user home"
 
 log "ADDING MINIMAL AWS CLOUD-INIT OVERRIDE"
 mkdir -p /etc/cloud/cloud.cfg.d
@@ -107,8 +122,13 @@ rm -f /etc/lvm/devices/system.devices /etc/lvm/cache/.cache
 
 log "REBUILDING INITRAMFS"
 dracut --regenerate-all --force
-for image in /boot/initramfs-*.img; do
-    if lsinitrd "$image" | grep -q 'etc/lvm/devices/system.devices'; then
+shopt -s nullglob
+initramfs_images=(/boot/initramfs-*.img)
+((${#initramfs_images[@]} > 0)) || die "No initramfs images were found in /boot"
+for image in "${initramfs_images[@]}"; do
+    # Do not use grep -q here: with pipefail it can hide a match when
+    # lsinitrd receives SIGPIPE after grep exits early.
+    if lsinitrd "$image" | grep 'etc/lvm/devices/system.devices' >/dev/null; then
         die "$image still contains system.devices"
     fi
 done
