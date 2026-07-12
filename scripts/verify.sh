@@ -61,6 +61,9 @@ if [[ "$selinux_mode" != "Disabled" ]]; then
     ls -Zd /localhome | grep -q ':home_root_t:' || die "/localhome does not have home_root_t"
     ls -Zd /localhome/ec2-user | grep -q ':user_home_dir_t:' || die "ec2-user home does not have user_home_dir_t"
     ls -Zd /localhome/ec2-user/.ssh | grep -q ':ssh_home_t:' || die ".ssh does not have ssh_home_t"
+    if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
+        ls -Z /localhome/ec2-user/.ssh/authorized_keys | grep -q ':ssh_home_t:' || die "authorized_keys does not have ssh_home_t"
+    fi
 fi
 
 log "FAILED SYSTEMD UNITS"
