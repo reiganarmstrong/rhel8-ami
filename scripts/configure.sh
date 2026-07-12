@@ -132,8 +132,21 @@ else
 fi
 
 log "CONFIGURING PORTABLE LVM DISCOVERY"
-if [[ -f /etc/lvm/lvmlocal.conf ]] && grep -qE '^[[:space:]]*[[:alnum:]_]+[[:space:]]*=' /etc/lvm/lvmlocal.conf; then
-    die "/etc/lvm/lvmlocal.conf already contains active settings"
+active_lvmlocal_settings=()
+if [[ -f /etc/lvm/lvmlocal.conf ]]; then
+    mapfile -t active_lvmlocal_settings < <(
+        grep -E '^[[:space:]]*[[:alnum:]_]+[[:space:]]*=' /etc/lvm/lvmlocal.conf || true
+    )
+fi
+
+if ((${#active_lvmlocal_settings[@]} > 0)); then
+    if [[ "$lvm_supports_devicesfile" == true ]] &&
+        ((${#active_lvmlocal_settings[@]} == 1)) &&
+        [[ "${active_lvmlocal_settings[0]}" =~ ^[[:space:]]*use_devicesfile[[:space:]]*=[[:space:]]*0[[:space:]]*$ ]]; then
+        echo "/etc/lvm/lvmlocal.conf already has the desired portable setting."
+    else
+        die "/etc/lvm/lvmlocal.conf contains unknown active settings"
+    fi
 fi
 
 if [[ "$lvm_supports_devicesfile" == true ]]; then
