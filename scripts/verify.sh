@@ -26,7 +26,11 @@ systemctl show cloud-init.service -p RequiresMountsFor | grep -q '/localhome' ||
 cloud-init schema --system || echo "WARNING: cloud-init schema validation returned nonzero"
 
 log "VERIFYING LVM"
-lvmconfig --type current devices/use_devicesfile | tr -d ' ' | grep -qx 'use_devicesfile=0' || die "LVM devices-file feature is enabled"
+if lvmconfig --type default devices/use_devicesfile >/dev/null 2>&1; then
+    lvmconfig --type current devices/use_devicesfile | tr -d ' ' | grep -qx 'use_devicesfile=0' || die "LVM devices-file feature is enabled"
+else
+    echo "This LVM version does not support devices/use_devicesfile; skipping that setting check."
+fi
 [[ ! -e /etc/lvm/devices/system.devices ]] || die "/etc/lvm/devices/system.devices exists"
 pvs
 vgs

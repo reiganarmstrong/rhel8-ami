@@ -99,25 +99,38 @@ else
 fi
 
 log "TESTING LVM WITHOUT THE DEVICES FILE"
-pvs --config 'devices { use_devicesfile=0 }' -o pv_name,pv_uuid,vg_name
-vgs --config 'devices { use_devicesfile=0 }' -o vg_name,vg_uuid,pv_count,lv_count
-lvs --config 'devices { use_devicesfile=0 }' -a -o lv_name,vg_name,lv_path,devices
+lvm_supports_devicesfile=false
+if lvmconfig --type default devices/use_devicesfile >/dev/null 2>&1; then
+    lvm_supports_devicesfile=true
+    pvs --config 'devices { use_devicesfile=0 }' -o pv_name,pv_uuid,vg_name
+    vgs --config 'devices { use_devicesfile=0 }' -o vg_name,vg_uuid,pv_count,lv_count
+    lvs --config 'devices { use_devicesfile=0 }' -a -o lv_name,vg_name,lv_path,devices
+else
+    echo "This LVM version predates the devices-file feature."
+    pvs -o pv_name,pv_uuid,vg_name
+    vgs -o vg_name,vg_uuid,pv_count,lv_count
+    lvs -a -o lv_name,vg_name,lv_path,devices
+fi
 
 log "CONFIGURING PORTABLE LVM DISCOVERY"
-if [[ -f /etc/lvm/lvmlocal.conf ]] && grep -Ev '^[[:space:]]*(#|$)' /etc/lvm/lvmlocal.conf | grep -q .; then
+if [[ -f /etc/lvm/lvmlocal.conf ]] && grep -qE '^[[:space:]]*[[:alnum:]_]+[[:space:]]*=' /etc/lvm/lvmlocal.conf; then
     die "/etc/lvm/lvmlocal.conf already contains active settings"
 fi
 
-cat >/etc/lvm/lvmlocal.conf <<'EOF'
+if [[ "$lvm_supports_devicesfile" == true ]]; then
+    cat >/etc/lvm/lvmlocal.conf <<'EOF'
 # Portable vSphere-to-EC2 image policy.
 devices {
     use_devicesfile = 0
 }
 EOF
-chown root:root /etc/lvm/lvmlocal.conf
-chmod 0600 /etc/lvm/lvmlocal.conf
-restorecon -v /etc/lvm/lvmlocal.conf
-lvmconfig --type current devices/use_devicesfile | tr -d ' ' | grep -qx 'use_devicesfile=0' || die "LVM devices-file support is still enabled"
+    chown root:root /etc/lvm/lvmlocal.conf
+    chmod 0600 /etc/lvm/lvmlocal.conf
+    restorecon -v /etc/lvm/lvmlocal.conf
+    lvmconfig --type current devices/use_devicesfile | tr -d ' ' | grep -qx 'use_devicesfile=0' || die "LVM devices-file support is still enabled"
+else
+    echo "This LVM version does not support devices/use_devicesfile; no setting is needed."
+fi
 rm -f /etc/lvm/devices/system.devices /etc/lvm/cache/.cache
 
 log "REBUILDING INITRAMFS"
