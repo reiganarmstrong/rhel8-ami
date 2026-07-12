@@ -1,33 +1,63 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prepare a running RHEL 8 EC2 builder for capture as a portable AMI.
+#
+# This script is intentionally run before a reboot.  It changes the ec2-user
+# home, repairs cloud-init's AWS/default-user configuration, establishes
+# systemd mount ordering, applies the SELinux labels required by sshd, disables
+# host-specific LVM device-file discovery, and rebuilds every initramfs.
+#
+# Expected lifecycle:
+#   configure.sh -> reboot -> verify.sh -> finalize.sh -> stop -> create AMI
+#
+# The script uses fail-fast shell options because continuing after a partial
+# account, boot, or initramfs change can produce an image that cannot boot or
+# cannot be reached over SSH.  It is safe to rerun when lvmlocal.conf contains
+# either no active setting or the exact use_devicesfile=0 policy managed here.
+
+# Keep operator-facing output easy to locate in an interactive build log.
 log() { printf '\n===== %s =====\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"; }
 
+# Every mutation below targets root-owned system configuration.
 (( EUID == 0 )) || die "Run this script as root"
 
 log "CHECKING REQUIRED BASE-IMAGE TOOLS"
+# No packages are installed during image preparation.  Fail before making any
+# changes if the imported baseline does not already contain a required tool.
 required_commands=(cloud-init getenforce getent usermod systemctl mountpoint findmnt pvs vgs lvs lvmconfig dracut lsinitrd restorecon chcon)
 for command_name in "${required_commands[@]}"; do
     require_command "$command_name"
 done
 
+# /localhome must be the real mounted filesystem before creating directories
+# or keys.  Otherwise those files would be hidden beneath the later mount.
 mountpoint -q /localhome || die "/localhome is not mounted"
 getent passwd ec2-user >/dev/null || die "ec2-user does not exist in the source AMI"
 [[ ! -e /etc/cloud/cloud-init.disabled ]] || die "cloud-init is disabled by /etc/cloud/cloud-init.disabled"
 
+# verify.sh compares this value after reboot.  This prevents an operator from
+# accidentally validating the still-running, pre-reboot kernel/initramfs.
 cat /proc/sys/kernel/random/boot_id >/etc/packer-configure-boot-id
 
 log "CONFIGURING EC2-USER"
+# Capture the passwd-defined source home before changing it.  Do not use the
+# source image's broken /home as a hard-coded fallback.
 old_home="$(getent passwd ec2-user | cut -d: -f6)"
 new_home="/localhome/ec2-user"
 
+# OpenSSH StrictModes expects private user and .ssh directories.  install -d
+# is idempotent and also normalizes ownership/mode on existing directories.
 install -d -o ec2-user -g ec2-user -m 0700 "$new_home"
 install -d -o ec2-user -g ec2-user -m 0700 "$new_home/.ssh"
 key_source_home="$old_home"
 old_authorized_keys="$key_source_home/.ssh/authorized_keys"
 new_authorized_keys="$new_home/.ssh/authorized_keys"
+# Preserve access across the required builder reboot when a real home move is
+# needed.  If both files contain keys, merge exact missing lines rather than
+# replacing a key that may already have been installed in the destination.
 if [[ -s "$old_authorized_keys" && ! "$old_authorized_keys" -ef "$new_authorized_keys" ]]; then
     if [[ ! -s "$new_authorized_keys" ]]; then
         echo "Copying the inherited SSH key from $key_source_home to $new_home for the builder reboot."
@@ -35,6 +65,8 @@ if [[ -s "$old_authorized_keys" && ! "$old_authorized_keys" -ef "$new_authorized
             "$old_authorized_keys" "$new_authorized_keys"
     else
         echo "Merging inherited SSH keys from $key_source_home into $new_home."
+        # Ensure a source key cannot be concatenated onto a destination file
+        # whose last line lacks a trailing newline.
         last_character="$(tail -c 1 "$new_authorized_keys")"
         [[ -z "$last_character" ]] || printf '\n' >>"$new_authorized_keys"
         while IFS= read -r authorized_key || [[ -n "$authorized_key" ]]; do
@@ -44,6 +76,7 @@ if [[ -s "$old_authorized_keys" && ! "$old_authorized_keys" -ef "$new_authorized
     fi
 fi
 
+# usermod reports "no changes" when rerun on an already-configured builder.
 usermod -d /localhome/ec2-user -s /bin/bash ec2-user
 getent passwd ec2-user | grep -q ':/localhome/ec2-user:/bin/bash$' || die "ec2-user does not use /localhome/ec2-user"
 
@@ -51,9 +84,13 @@ if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
     chown ec2-user:ec2-user /localhome/ec2-user/.ssh/authorized_keys
     chmod 0600 /localhome/ec2-user/.ssh/authorized_keys
 fi
+# This inherited key is deliberately required for the builder reboot.  A
+# production cleanup decision is deferred to finalize.sh.
 [[ -s /localhome/ec2-user/.ssh/authorized_keys ]] || die "No usable authorized_keys file exists in the new ec2-user home"
 
 log "ADDING MINIMAL AWS CLOUD-INIT OVERRIDE"
+# Use a late-loading file so it wins over the imported image's 01_aws.cfg
+# without rewriting the vendor-managed /etc/cloud/cloud.cfg.
 mkdir -p /etc/cloud/cloud.cfg.d
 cat >/etc/cloud/cloud.cfg.d/99-aws-ec2.cfg <<'EOF'
 #cloud-config
@@ -65,6 +102,9 @@ datasource_list: [Ec2]
 users:
   - default
 
+# system_info tells the distro abstraction where the default account lives.
+# The users: [default] marker above is separately required by cc_ssh to choose
+# that account as the destination for the EC2 metadata public key.
 system_info:
   default_user:
     name: ec2-user
@@ -75,16 +115,22 @@ chown root:root /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
 chmod 0644 /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
 restorecon -v /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
 
+# Confirm both key-related modules exist in the packaged module sequence.  The
+# override selects the account; these modules create/update it and its keys.
 grep -qE '^[[:space:]]*-[[:space:]]*default[[:space:]]*$' /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg || die "AWS override does not restore users: [default]"
 grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*users[_-]groups[[:space:]]*$' || die "users_groups is missing from cloud_init_modules"
 grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*ssh[[:space:]]*$' || die "ssh is missing from cloud_init_modules"
 
 log "CONFIGURING /LOCALHOME BOOT ORDERING"
+# A previous iteration targeted cloud-config.service, which is too late: the
+# users_groups and ssh modules run in cloud-init.service.  Remove that obsolete
+# drop-in and attach the mount requirement to the correct unit.
 rm -f /etc/systemd/system/cloud-config.service.d/99-wait-for-localhome.conf
 rmdir /etc/systemd/system/cloud-config.service.d 2>/dev/null || true
 mkdir -p /etc/systemd/system/cloud-init.service.d
 cat >/etc/systemd/system/cloud-init.service.d/99-wait-for-localhome.conf <<'EOF'
 [Unit]
+# systemd derives the required mount unit from the system's mount definition.
 RequiresMountsFor=/localhome
 EOF
 systemctl daemon-reload
@@ -99,14 +145,21 @@ if [[ "$selinux_mode" != "Disabled" ]]; then
         semanage fcontext -d -e /home /localhome 2>/dev/null || true
     fi
 
+    # Direct labels are intentional for this baseline.  Its /home policy is
+    # broken, so restorecon through a /home equivalence maps these paths back
+    # to default_t and prevents sshd_t from reading authorized_keys.
     chcon -t home_root_t /localhome
     chcon -t user_home_dir_t /localhome/ec2-user
     chcon -t ssh_home_t /localhome/ec2-user/.ssh
     if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
         chcon -t ssh_home_t /localhome/ec2-user/.ssh/authorized_keys
     fi
+    # finalize.sh uses this marker to avoid a later restorecon that would undo
+    # the explicit labels.
     printf '%s\n' direct >/etc/packer-localhome-selinux-mode
 
+    # Fail immediately while the current SSH session is still available.  A
+    # builder must never be rebooted with default_t on these paths.
     ls -Zd /localhome | grep -q ':home_root_t:' || die "/localhome does not have home_root_t"
     ls -Zd /localhome/ec2-user | grep -q ':user_home_dir_t:' || die "ec2-user home does not have user_home_dir_t"
     ls -Zd /localhome/ec2-user/.ssh | grep -q ':ssh_home_t:' || die ".ssh does not have ssh_home_t"
@@ -118,6 +171,9 @@ else
 fi
 
 log "TESTING LVM WITHOUT THE DEVICES FILE"
+# RHEL 8 minor releases span LVM versions from before and after the devices-file
+# feature was introduced.  Test discovery with the portable setting only when
+# the installed version understands it; older versions already scan devices.
 lvm_supports_devicesfile=false
 if lvmconfig --type default devices/use_devicesfile >/dev/null 2>&1; then
     lvm_supports_devicesfile=true
@@ -132,6 +188,10 @@ else
 fi
 
 log "CONFIGURING PORTABLE LVM DISCOVERY"
+# lvmlocal.conf is host-local by design.  Accept an empty vendor template and
+# the exact setting previously written by this script.  Refuse any other active
+# setting because silently discarding system_id, locking, or activation policy
+# could make the volume group inaccessible or unsafe.
 active_lvmlocal_settings=()
 if [[ -f /etc/lvm/lvmlocal.conf ]]; then
     mapfile -t active_lvmlocal_settings < <(
@@ -150,6 +210,8 @@ if ((${#active_lvmlocal_settings[@]} > 0)); then
 fi
 
 if [[ "$lvm_supports_devicesfile" == true ]]; then
+    # Disabling system.devices makes LVM discover the imported VG from on-disk
+    # metadata instead of retaining vSphere-specific device identifiers.
     cat >/etc/lvm/lvmlocal.conf <<'EOF'
 # Portable vSphere-to-EC2 image policy.
 devices {
@@ -163,9 +225,14 @@ EOF
 else
     echo "This LVM version does not support devices/use_devicesfile; no setting is needed."
 fi
+# Remove both persistent and legacy cached device state before rebuilding the
+# boot images.  finalize.sh repeats this because runtime commands may recreate
+# the files after the verification reboot.
 rm -f /etc/lvm/devices/system.devices /etc/lvm/cache/.cache
 
 log "REBUILDING INITRAMFS"
+# Rebuild all installed kernel images so none carries stale LVM device state.
+# This is normally the slowest operation in the script.
 dracut --regenerate-all --force
 shopt -s nullglob
 initramfs_images=(/boot/initramfs-*.img)
@@ -178,4 +245,5 @@ for image in "${initramfs_images[@]}"; do
     fi
 done
 
+# Do not reboot unless this marker is printed.  verify.sh is the next step.
 log "CONFIGURATION COMPLETE"

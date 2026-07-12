@@ -55,3 +55,6 @@ the repository into the restricted network, run:
 ```
 
 For the initial test AMI, inherited `authorized_keys` files are deliberately preserved. Review the commented production cleanup in `scripts/finalize.sh` before promoting this workflow.
+
+For detailed script behavior, safety notes, troubleshooting boundaries, and a
+complete manual AMI workflow, see [`scripts/README.md`](scripts/README.md).
