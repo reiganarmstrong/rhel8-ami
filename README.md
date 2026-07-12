@@ -2,7 +2,7 @@
 
 Build a portable RHEL 8 EC2 AMI from an AMI imported from a vSphere baseline. The build repairs cloud-init SSH-key handling for `ec2-user`, makes cloud-init wait for `/localhome`, removes hardware-specific LVM device state, and applies suitable SELinux labels.
 
-The EC2 builder installs no packages. The source image must already provide cloud-init, LVM2, dracut, systemd, OpenSSH server, and the base policycoreutils commands. `semanage` is optional; the configuration script uses a direct-label fallback when it is unavailable.
+The EC2 builder installs no packages. The source image must already provide cloud-init, LVM2, dracut, systemd, OpenSSH server, and the base policycoreutils commands. The configuration script does not depend on the source image's broken `/home`; it applies explicit SELinux labels directly to `/localhome`.
 
 ## Prerequisites
 

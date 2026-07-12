@@ -26,9 +26,6 @@ new_home="/localhome/ec2-user"
 install -d -o ec2-user -g ec2-user -m 0700 "$new_home"
 install -d -o ec2-user -g ec2-user -m 0700 "$new_home/.ssh"
 key_source_home="$old_home"
-if [[ "$old_home" == "$new_home" && -s /home/ec2-user/.ssh/authorized_keys ]]; then
-    key_source_home="/home/ec2-user"
-fi
 old_authorized_keys="$key_source_home/.ssh/authorized_keys"
 new_authorized_keys="$new_home/.ssh/authorized_keys"
 if [[ -s "$old_authorized_keys" && ! "$old_authorized_keys" -ef "$new_authorized_keys" ]]; then
@@ -92,19 +89,18 @@ log "CONFIGURING SELINUX"
 selinux_mode="$(getenforce 2>/dev/null || echo Disabled)"
 if [[ "$selinux_mode" != "Disabled" ]]; then
     if command -v semanage >/dev/null 2>&1; then
-        semanage fcontext -a -e /home /localhome 2>/dev/null || semanage fcontext -m -e /home /localhome
-        restorecon -RFv /localhome
-        printf '%s\n' persistent >/etc/packer-localhome-selinux-mode
-    else
-        echo "WARNING: semanage is unavailable; using direct SELinux labels."
-        chcon -t home_root_t /localhome
-        chcon -t user_home_dir_t /localhome/ec2-user
-        chcon -t ssh_home_t /localhome/ec2-user/.ssh
-        if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
-            chcon -t ssh_home_t /localhome/ec2-user/.ssh/authorized_keys
-        fi
-        printf '%s\n' direct >/etc/packer-localhome-selinux-mode
+        # This source image's /home policy resolves to default_t, so an
+        # equivalence mapping actively breaks SSH under /localhome.
+        semanage fcontext -d -e /home /localhome 2>/dev/null || true
     fi
+
+    chcon -t home_root_t /localhome
+    chcon -t user_home_dir_t /localhome/ec2-user
+    chcon -t ssh_home_t /localhome/ec2-user/.ssh
+    if [[ -f /localhome/ec2-user/.ssh/authorized_keys ]]; then
+        chcon -t ssh_home_t /localhome/ec2-user/.ssh/authorized_keys
+    fi
+    printf '%s\n' direct >/etc/packer-localhome-selinux-mode
 
     ls -Zd /localhome | grep -q ':home_root_t:' || die "/localhome does not have home_root_t"
     ls -Zd /localhome/ec2-user | grep -q ':user_home_dir_t:' || die "ec2-user home does not have user_home_dir_t"
