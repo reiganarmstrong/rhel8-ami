@@ -20,6 +20,7 @@ id ec2-user
 log "VERIFYING CLOUD-INIT CONFIGURATION"
 [[ ! -e /etc/cloud/cloud-init.disabled ]] || die "cloud-init is disabled"
 grep -q 'datasource_list:.*Ec2' /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg || die "AWS datasource override is missing"
+grep -qE '^[[:space:]]*-[[:space:]]*default[[:space:]]*$' /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg || die "AWS override does not restore users: [default]"
 grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*users[_-]groups[[:space:]]*$' || die "users_groups is not in cloud_init_modules"
 grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*ssh[[:space:]]*$' || die "ssh is not in cloud_init_modules"
 systemctl show cloud-init.service -p RequiresMountsFor | grep -q '/localhome' || die "cloud-init.service does not wait for /localhome"

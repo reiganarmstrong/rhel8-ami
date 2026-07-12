@@ -60,6 +60,11 @@ cat >/etc/cloud/cloud.cfg.d/99-aws-ec2.cfg <<'EOF'
 
 datasource_list: [Ec2]
 
+# 01_aws.cfg replaces this list with a named ec2-user entry.  Restore the
+# default marker so cc_ssh knows which account receives the EC2 metadata key.
+users:
+  - default
+
 system_info:
   default_user:
     name: ec2-user
@@ -70,7 +75,7 @@ chown root:root /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
 chmod 0644 /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
 restorecon -v /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg
 
-grep -qE '^[[:space:]]*-[[:space:]]*default[[:space:]]*$' /etc/cloud/cloud.cfg || die "Packaged cloud.cfg does not contain users: [default]"
+grep -qE '^[[:space:]]*-[[:space:]]*default[[:space:]]*$' /etc/cloud/cloud.cfg.d/99-aws-ec2.cfg || die "AWS override does not restore users: [default]"
 grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*users[_-]groups[[:space:]]*$' || die "users_groups is missing from cloud_init_modules"
 grep -A60 '^cloud_init_modules:' /etc/cloud/cloud.cfg | grep -qE '^[[:space:]]*-[[:space:]]*ssh[[:space:]]*$' || die "ssh is missing from cloud_init_modules"
 
