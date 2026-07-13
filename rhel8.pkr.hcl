@@ -22,6 +22,9 @@ source "amazon-ebs" "rhel8" {
 
   ssh_username         = "ec2-user"
   ssh_private_key_file = var.ssh_private_key_file
+  # Packer uses an internal SSH client, so this is its direct-connection
+  # equivalent to running OpenSSH with -o ProxyCommand=none.
+  ssh_proxy_host       = ""
   ssh_timeout          = "15m"
 
   ami_name        = "${var.ami_name_prefix}-${formatdate("YYYYMMDD-hhmmss", timestamp())}"
@@ -64,7 +67,7 @@ build {
 
   provisioner "shell" {
     script          = "scripts/configure.sh"
-    execute_command = "chmod +x '{{ .Path }}'; sudo -E bash '{{ .Path }}'"
+    execute_command = "sudo -E -- bash '{{ .Path }}'"
   }
 
   provisioner "shell" {
@@ -76,11 +79,11 @@ build {
     script              = "scripts/verify.sh"
     pause_before        = "30s"
     start_retry_timeout = "10m"
-    execute_command     = "chmod +x '{{ .Path }}'; sudo -E bash '{{ .Path }}'"
+    execute_command     = "sudo -E -- bash '{{ .Path }}'"
   }
 
   provisioner "shell" {
     script          = "scripts/finalize.sh"
-    execute_command = "chmod +x '{{ .Path }}'; sudo -E bash '{{ .Path }}'"
+    execute_command = "sudo -E -- bash '{{ .Path }}'"
   }
 }

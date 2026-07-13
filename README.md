@@ -32,6 +32,15 @@ removes the plugin's executable mode, the wrapper automatically changes its
 permissions to `0755` before invoking Packer. The repository must be writable
 for that one-time repair.
 
+The template explicitly leaves `ssh_proxy_host` empty so Packer's SSH
+communicator connects directly to the builder's private IP.
+
+Packer uses its internal SSH communicator and does not invoke the system
+`ssh` command or consume its `ProxyCommand` option. For a manual connection on
+a workstation whose SSH configuration defines a proxy, use
+`ssh -o ProxyCommand=none ...`; the empty `ssh_proxy_host` above is the
+corresponding direct-connection policy in the Packer template.
+
 The Packer CLI itself must already be installed on the machine. No other Packer
 plugins are used by this template. The shell provisioners use software already
 present in the source AMI and do not access package repositories.
