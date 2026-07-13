@@ -4,33 +4,19 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 plugin_root="$repo_root/vendor/packer/plugins"
 plugin_binary="$plugin_root/github.com/hashicorp/amazon/packer-plugin-amazon_v1.8.1_x5.0_linux_amd64"
-plugin_checksum="$plugin_binary"_SHA256SUM
 
 if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
     echo "The vendored Packer plugin supports Linux x86_64 only." >&2
     exit 1
 fi
 
-if [[ ! -x "$plugin_binary" || ! -f "$plugin_checksum" ]]; then
-    echo "The vendored Amazon plugin or its checksum is missing." >&2
+if [[ ! -x "$plugin_binary" ]]; then
+    echo "The vendored Amazon plugin is missing or is not executable." >&2
     exit 1
 fi
 
 if ! command -v packer >/dev/null 2>&1; then
     echo "Packer is not installed or is not on PATH." >&2
-    exit 1
-fi
-
-if ! command -v sha256sum >/dev/null 2>&1; then
-    echo "sha256sum is required to verify the vendored plugin." >&2
-    exit 1
-fi
-
-read -r expected_checksum <"$plugin_checksum"
-actual_checksum="$(sha256sum "$plugin_binary")"
-actual_checksum="${actual_checksum%% *}"
-if [[ "$actual_checksum" != "$expected_checksum" ]]; then
-    echo "The vendored Amazon plugin failed its SHA-256 verification." >&2
     exit 1
 fi
 

@@ -17,12 +17,17 @@ The EC2 builder installs no packages. The source image must already provide clou
 
 ## Offline plugin dependency
 
-The repository includes the Linux x86_64 Amazon plugin v1.8.1 and the checksum
-file required by Packer under `vendor/packer/plugins`. The plugin version is
-exactly pinned in `rhel8.pkr.hcl`. Use the repository's `./packer` wrapper for
-every command; it sets `PACKER_PLUGIN_PATH` to the vendored plugin tree and
-disables HashiCorp checkpoint calls, so Packer does not query or download from
-GitHub, HashiCorp Releases, or the HashiCorp checkpoint service.
+The repository includes the Linux x86_64 Amazon plugin v1.8.1 and the companion
+checksum file required for Packer plugin discovery under
+`vendor/packer/plugins`. The plugin version is exactly pinned in
+`rhel8.pkr.hcl`. Use the repository's `./packer-wrapper.sh` launcher for every
+command; it sets `PACKER_PLUGIN_PATH` to the vendored plugin tree and disables
+HashiCorp checkpoint calls, so Packer does not query or download from GitHub,
+HashiCorp Releases, or the HashiCorp checkpoint service.
+
+The wrapper does not calculate or compare checksums. The checked-in
+`_SHA256SUM` file remains because modern Packer requires that companion file to
+discover a manually installed plugin.
 
 The Packer CLI itself must already be installed on the machine. No other Packer
 plugins are used by this template. The shell provisioners use software already
@@ -41,9 +46,9 @@ The resulting `build.auto.pkrvars.hcl` and all private keys are ignored by Git.
 ## Build
 
 ```bash
-./packer fmt -recursive .
-./packer validate .
-./packer build -on-error=ask .
+./packer-wrapper.sh fmt -recursive .
+./packer-wrapper.sh validate .
+./packer-wrapper.sh build -on-error=ask .
 ```
 
 Do not run `packer init`; the required plugin is already installed in the
@@ -51,7 +56,7 @@ repository. To confirm the vendored dependency is discoverable before moving
 the repository into the restricted network, run:
 
 ```bash
-./packer plugins installed
+./packer-wrapper.sh plugins installed
 ```
 
 For the initial test AMI, inherited `authorized_keys` files are deliberately preserved. Review the commented production cleanup in `scripts/finalize.sh` before promoting this workflow.

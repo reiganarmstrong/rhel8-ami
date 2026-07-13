@@ -1,7 +1,7 @@
 # Vendored Packer plugins
 
 This tree follows Packer's required namespaced plugin layout and is selected by
-the repository-root `packer` wrapper through `PACKER_PLUGIN_PATH`.
+the repository-root `packer-wrapper.sh` launcher through `PACKER_PLUGIN_PATH`.
 
 ## Amazon
 
@@ -14,5 +14,7 @@ the repository-root `packer` wrapper through `PACKER_PLUGIN_PATH`.
 - Extracted binary SHA-256: `13b0662a04fddb0c2e04252be8b6b64812c28ce33fe8cc9d6243518aae0bff17`
 
 The adjacent `_SHA256SUM` file contains the raw extracted-binary digest in the
-format required by Packer. When updating the plugin, update the exact version
-constraint and binary path in `rhel8.pkr.hcl` and the root wrapper together.
+format required for modern Packer to discover the plugin. The repository
+wrapper does not independently calculate or compare this digest. When updating
+the plugin, update the exact version constraint and binary path in
+`rhel8.pkr.hcl` and the root wrapper together.
