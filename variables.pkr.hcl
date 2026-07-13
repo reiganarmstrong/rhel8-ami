@@ -10,6 +10,12 @@ variable "aws_region" {
   default     = "us-gov-west-1"
 }
 
+variable "builder_name" {
+  description = "Name tag applied to the temporary builder instance."
+  type        = string
+  default     = "packer-rhel8-builder"
+}
+
 variable "instance_type" {
   description = "EC2 instance type used for the temporary builder."
   type        = string

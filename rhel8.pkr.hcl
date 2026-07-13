@@ -43,7 +43,7 @@ source "amazon-ebs" "rhel8" {
   }
 
   run_tags = {
-    Name    = "packer-rhel8-builder"
+    Name    = var.builder_name
     Project = "DVCO"
     Purpose = "AMI build"
   }

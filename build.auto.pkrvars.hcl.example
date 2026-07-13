@@ -1,4 +1,5 @@
-aws_region = "us-gov-west-1"
+aws_region   = "us-gov-west-1"
+builder_name = "packer-rhel8-builder"
 
 source_ami = "ami-xxxxxxxxxxxxxxxxx"
 
