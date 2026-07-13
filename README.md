@@ -27,7 +27,10 @@ HashiCorp Releases, or the HashiCorp checkpoint service.
 
 The wrapper does not calculate or compare checksums. The checked-in
 `_SHA256SUM` file remains because modern Packer requires that companion file to
-discover a manually installed plugin.
+discover a manually installed plugin. If an archive extraction or file copy
+removes the plugin's executable mode, the wrapper automatically changes its
+permissions to `0755` before invoking Packer. The repository must be writable
+for that one-time repair.
 
 The Packer CLI itself must already be installed on the machine. No other Packer
 plugins are used by this template. The shell provisioners use software already

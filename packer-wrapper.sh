@@ -10,8 +10,24 @@ if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$plugin_binary" ]]; then
+    echo "The vendored Amazon plugin is missing." >&2
+    exit 1
+fi
+
+# Archive extraction and some file-copy methods can discard Git's executable
+# mode. Repair that common case before asking Packer to load the plugin.
 if [[ ! -x "$plugin_binary" ]]; then
-    echo "The vendored Amazon plugin is missing or is not executable." >&2
+    echo "Setting the vendored Amazon plugin permissions to 0755."
+    if ! chmod 0755 "$plugin_binary"; then
+        echo "Unable to make the vendored Amazon plugin executable." >&2
+        exit 1
+    fi
+fi
+
+# chmod cannot overcome a filesystem mounted with noexec.
+if [[ ! -x "$plugin_binary" ]]; then
+    echo "The vendored Amazon plugin is on a filesystem that does not allow execution." >&2
     exit 1
 fi
 

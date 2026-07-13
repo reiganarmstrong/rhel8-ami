@@ -2,8 +2,11 @@ aws_region = "us-gov-west-1"
 
 source_ami = "ami-xxxxxxxxxxxxxxxxx"
 
-subnet_id         = "subnet-xxxxxxxxxxxxxxxxx"
-security_group_id = "sg-xxxxxxxxxxxxxxxxx"
+subnet_id = "subnet-xxxxxxxxxxxxxxxxx"
+security_group_ids = [
+  "sg-xxxxxxxxxxxxxxxxx",
+  "sg-yyyyyyyyyyyyyyyyy",
+]
 
 instance_type = "t3.medium"
 

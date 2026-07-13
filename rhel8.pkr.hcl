@@ -8,46 +8,14 @@ packer {
   }
 }
 
-variable "aws_region" {
-  type    = string
-  default = "us-gov-west-1"
-}
-
-variable "source_ami" {
-  type = string
-}
-
-variable "subnet_id" {
-  type = string
-}
-
-variable "security_group_id" {
-  type = string
-}
-
-variable "ssh_private_key_file" {
-  type      = string
-  sensitive = true
-}
-
-variable "instance_type" {
-  type    = string
-  default = "t3.medium"
-}
-
-variable "ami_name_prefix" {
-  type    = string
-  default = "rhel8-vsphere"
-}
-
 source "amazon-ebs" "rhel8" {
   region = var.aws_region
 
   source_ami    = var.source_ami
   instance_type = var.instance_type
 
-  subnet_id         = var.subnet_id
-  security_group_id = var.security_group_id
+  subnet_id          = var.subnet_id
+  security_group_ids = var.security_group_ids
 
   associate_public_ip_address = false
   ssh_interface               = "private_ip"
@@ -69,13 +37,23 @@ source "amazon-ebs" "rhel8" {
 
   tags = {
     Name    = var.ami_name_prefix
+    Project = "DVCO"
     Source  = "vSphere"
     BuiltBy = "Packer"
   }
 
   run_tags = {
     Name    = "packer-rhel8-builder"
+    Project = "DVCO"
     Purpose = "AMI build"
+  }
+
+  run_volume_tags = {
+    Project = "DVCO"
+  }
+
+  snapshot_tags = {
+    Project = "DVCO"
   }
 }
 
