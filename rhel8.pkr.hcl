@@ -71,7 +71,8 @@ build {
   }
 
   provisioner "shell" {
-    inline            = ["sudo systemctl reboot"]
+    inline            = ["systemctl reboot"]
+    execute_command   = "sudo -E -- bash '{{ .Path }}'"
     expect_disconnect = true
   }
 
