@@ -230,6 +230,57 @@ fi
 # the files after the verification reboot.
 rm -f /etc/lvm/devices/system.devices /etc/lvm/cache/.cache
 
+log "CONFIGURING EARLY /USR MOUNT"
+# This image uses a separate /usr filesystem, and /sbin/init resolves to a
+# binary below /usr.  Marking /usr as nofail lets systemd continue toward
+# switch-root without waiting for that essential filesystem.  Faster instance
+# sizes can expose the resulting race even when slower sizes happen to boot.
+# x-initrd.mount makes the dependency explicit in the initramfs.
+usr_fstab_entries="$(awk '
+    $0 !~ /^[[:space:]]*#/ && NF >= 4 && $2 == "/usr" { count++ }
+    END { print count + 0 }
+' /etc/fstab)"
+[[ "$usr_fstab_entries" == 1 ]] || die "Expected exactly one /usr entry in /etc/fstab; found $usr_fstab_entries"
+
+# Rewrite only the /usr entry.  Preserve every other line byte-for-byte,
+# retain its existing mount options except nofail, and avoid adding a duplicate
+# x-initrd.mount option when configure.sh is rerun.
+fstab_tmp="$(mktemp)"
+awk '
+    $0 ~ /^[[:space:]]*#/ || NF < 4 || $2 != "/usr" {
+        print
+        next
+    }
+
+    {
+        option_count = split($4, options, ",")
+        new_options = ""
+        has_initrd_mount = 0
+        for (i = 1; i <= option_count; i++) {
+            if (options[i] == "" || options[i] == "nofail")
+                continue
+            if (options[i] == "x-initrd.mount")
+                has_initrd_mount = 1
+            new_options = new_options (new_options == "" ? "" : ",") options[i]
+        }
+        if (!has_initrd_mount)
+            new_options = new_options (new_options == "" ? "" : ",") "x-initrd.mount"
+
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n", $1, $2, $3, new_options, $5, $6
+    }
+' /etc/fstab >"$fstab_tmp"
+install -o root -g root -m 0644 "$fstab_tmp" /etc/fstab
+rm -f "$fstab_tmp"
+restorecon -v /etc/fstab
+
+# Validate the complete file before embedding its boot policy in initramfs.
+# Also assert the exact conditions managed above so a syntactically valid but
+# optional /usr mount cannot pass unnoticed.
+findmnt --verify --verbose
+usr_fstab_options="$(findmnt --fstab --target /usr --noheadings --output OPTIONS)"
+grep -Eq '(^|,)x-initrd\.mount(,|$)' <<<"$usr_fstab_options" || die "/usr is not marked x-initrd.mount"
+! grep -Eq '(^|,)nofail(,|$)' <<<"$usr_fstab_options" || die "/usr is still marked nofail"
+
 log "REBUILDING INITRAMFS"
 # Rebuild all installed kernel images so none carries stale LVM device state.
 # This is normally the slowest operation in the script.

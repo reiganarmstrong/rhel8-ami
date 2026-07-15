@@ -20,8 +20,19 @@ log "VERIFYING REBOOTED FILESYSTEMS"
 [[ "$(cat /proc/sys/kernel/random/boot_id)" != "$(cat /etc/packer-configure-boot-id)" ]] || die "The instance has not rebooted since configure.sh ran"
 # cloud-init key placement depends on this mount being available at boot.
 mountpoint -q /localhome || die "/localhome did not mount after reboot"
+# /usr contains systemd itself on this image and must be a real mount, not an
+# optional filesystem that happened to appear before switch-root.
+mountpoint -q /usr || die "/usr did not mount after reboot"
 findmnt /
+findmnt /usr
 findmnt /localhome
+
+# Check the persisted policy as well as the live mount.  x-initrd.mount is a
+# systemd fstab option and is not necessarily visible among the kernel's live
+# mount flags, so query /etc/fstab explicitly.
+usr_fstab_options="$(findmnt --fstab --target /usr --noheadings --output OPTIONS)"
+grep -Eq '(^|,)x-initrd\.mount(,|$)' <<<"$usr_fstab_options" || die "/usr is not marked x-initrd.mount"
+! grep -Eq '(^|,)nofail(,|$)' <<<"$usr_fstab_options" || die "/usr is still marked nofail"
 
 log "VERIFYING EC2-USER"
 # Confirm NSS/passwd resolves the account to the home cloud-init and sshd use.

@@ -35,6 +35,8 @@ the builder's identity is removed.
   baseline and applies explicit labels required by `sshd`.
 - Tests LVM discovery without a hardware-specific devices file.
 - Sets `devices/use_devicesfile=0` when the installed LVM supports it.
+- Makes the separate `/usr` filesystem a required initramfs mount instead of
+  allowing boot to continue without it.
 - Removes LVM device/cache state and rebuilds every installed initramfs.
 - Verifies no rebuilt initramfs contains `system.devices`.
 
@@ -55,6 +57,8 @@ It refuses unknown active LVM settings rather than overwriting them.
 - The portable LVM setting is effective where supported.
 - No runtime or initramfs `system.devices` file exists.
 - LVM can enumerate the expected PV, VG, and LVs.
+- `/usr` mounted after reboot and remains marked `x-initrd.mount`, without
+  `nofail`, in `/etc/fstab`.
 - OpenSSH ownership and permissions are safe.
 - `/localhome` and the SSH files have the required SELinux types.
 - Failed systemd units are displayed for operator review.
